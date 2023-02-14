@@ -1,0 +1,379 @@
+---
+title: "Quality check on unfiltered raw data - Nurr1 project"
+author: "Yuvarani Masarapu"
+date: '2022-11-30'
+output:   
+  html_document:
+    self_contained: true
+    number_sections: true
+    highlight: tango
+    df_print: paged
+    code_folding: hide
+    toc: yes
+    toc_depth: 3
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(fig.width=8, fig.height=8, warning=FALSE, message=FALSE)
+```
+
+```{r eval=FALSE}
+# R markdown script to load counts data as a list of seurat objects, and
+# add metadata columns to each of these object.
+```
+
+
+```{r message=FALSE, verbose=FALSE, warning=FALSE, eval=FALSE}
+### Loading package libraries
+library(Seurat)
+library(SeuratObject)
+#hdfr to read 10x hdf5r files, won't work otherwise
+library(hdf5r)
+library(readr)
+library(readxl)
+library(ggplot2)
+```
+
+
+```{r warning=FALSE, eval=FALSE}
+### Load processed data (outputs from spaceranger) into seurat
+# Add path to the directory where count matrices for each sample reside
+# For me, the spaceranger outputs are within 'spaceranger_outputs' folder of the project directory
+
+indir <- getwd()
+counts_path <- paste(indir, "/spaceranger_counts", sep = "")
+
+data.list <- list.files(counts_path, recursive = F, full.names = T)
+
+#iterate through all folders in data.list to load count matrices and images
+data.object <- lapply(data.list, function(folder){
+  each.object <- Load10X_Spatial(data.dir = folder)
+})
+
+rm(counts_path, data.list)
+```
+
+
+```{r message=FALSE, verbose=FALSE, eval=FALSE}
+### Add metadata
+brain_metadata <- read_excel(paste(indir, "/Nurr1_Project_LabInfo.xlsx", sep = ""), sheet = "Sheet1")
+brain_metadata$sno <- c(1:6)
+
+new_order <- c(brain_metadata$sno[brain_metadata$Type %in% "AAV-Nurr1cKO"], brain_metadata$sno[brain_metadata$Type %in% "AAV-Ctrl"])
+brain_metadata2 <- brain_metadata[new_order,]
+```
+
+Samples matching their corresponding mouse ids
+```{r}
+brain_metadata2[,c(1,7)]
+```
+
+
+# Before Filtering
+
+## Bar plots
+
+### Mean reads per spot
+
+```{r}
+#brain_metadata$SampleID <- factor(brain_metadata$SampleID, levels = c(brain_metadata$SampleID))
+
+p <- ggplot(data = brain_metadata2, aes(x= SampleID, y = MeanReadsPerSpot, fill = Type) ) +
+  geom_bar(stat = "identity") +
+  scale_x_discrete(limits = brain_metadata2$SampleID) +
+  theme_minimal() +
+  theme(axis.title.x = element_text(size = 20),
+        axis.title.y = element_text(size = 20),
+        axis.text.x = element_text(size = 15, angle = 90),
+        axis.text.y = element_text(size = 15),
+        legend.title = element_text(size = 20),
+        legend.text = element_text(size = 15))
+
+p
+```
+
+### Total genes detected
+
+```{r}
+p <- ggplot(data = brain_metadata2, aes(x=SampleID, y = TotalGenesDetected, fill = Type)) + 
+  geom_bar(stat = "identity") +
+  scale_x_discrete(limits = brain_metadata2$SampleID) +
+  theme_minimal() +
+  theme(axis.title.x = element_text(size = 20),
+        axis.title.y = element_text(size = 20),
+        axis.text.x = element_text(size = 15, angle = 90),
+        axis.text.y = element_text(size = 15),
+        legend.title = element_text(size = 20),
+        legend.text = element_text(size = 15))
+
+
+p
+```
+
+The overall data looks good. Now, let's look at their spatial and violin plots to investigate how the spots look on each tissue.
+
+```{r eval=FALSE}
+for (data in 1:length(data.object)){
+  
+  #create metadata columns for each sample object
+  sample_type = c(rep(brain_metadata$Type[data],length(rownames(data.object[[data]]@meta.data))))
+  tissue = c(rep(brain_metadata$Tissue[data],length(rownames(data.object[[data]]@meta.data))))
+  sub_array = c(rep(brain_metadata$Subarray[data],length(rownames(data.object[[data]]@meta.data))))
+  slide_id = c(rep(brain_metadata$Slide[data], length(rownames(data.object[[data]]@meta.data))))
+  sample_id = c(rep(brain_metadata$SampleID[data], length(rownames(data.object[[data]]@meta.data))))
+  organism = c(rep(brain_metadata$Organism[data], length(rownames(data.object[[data]]@meta.data))))
+  region = c(rep(brain_metadata$Region[data],length(rownames(data.object[[data]]@meta.data))))
+  mouse_id = c(rep(brain_metadata$MouseID[data],length(rownames(data.object[[data]]@meta.data))))
+  
+  #convert to named vectors
+  names(sample_type) <- rownames(data.object[[data]]@meta.data)
+  names(tissue) <- rownames(data.object[[data]]@meta.data)
+  names(sub_array) <- rownames(data.object[[data]]@meta.data)
+  names(slide_id) <- rownames(data.object[[data]]@meta.data)
+  names(sample_id) <- rownames(data.object[[data]]@meta.data)
+  names(organism) <- rownames(data.object[[data]]@meta.data)
+  names(region) <- rownames(data.object[[data]]@meta.data)
+  names(mouse_id) <- rownames(data.object[[data]]@meta.data)
+  
+  #add metadata columns to corresponding sample object
+  data.object[[data]] <- AddMetaData(object = data.object[[data]], metadata = sample_type, col.name = "sample_type")
+  data.object[[data]] <- AddMetaData(object = data.object[[data]], metadata = tissue, col.name = "tissue")
+  data.object[[data]] <- AddMetaData(object = data.object[[data]], metadata = sub_array, col.name = "sub_array")
+  data.object[[data]] <- AddMetaData(object = data.object[[data]], metadata = slide_id, col.name = "slide_id")
+  data.object[[data]] <- AddMetaData(object = data.object[[data]], metadata = sample_id, col.name = "sample_id")
+  data.object[[data]] <- AddMetaData(object = data.object[[data]], metadata = organism, col.name = "organism")
+  data.object[[data]] <- AddMetaData(object = data.object[[data]], metadata = region, col.name = "region")
+  data.object[[data]] <- AddMetaData(object = data.object[[data]], metadata = mouse_id, col.name = "mouse_id")
+  
+  rm(sample_type, tissue, sub_array,slide_id, sample_id, organism, region, mouse_id)
+}
+
+rm(data)
+```
+
+Reorder the list so all AAV-Nurr1cKO samples come first followed by all AAV-Ctrl samples
+```{r message=FALSE, verbose = FALSE, eval=FALSE}
+#order so first treated and then control samples
+data.object <- data.object[new_order]
+```
+
+
+## Spatial Plots
+
+### Genes per spot distribution
+```{r verbose = FALSE, message=FALSE, warning=FALSE, fig.show="hold", out.width="33%", fig.height=6, fig.width=6}
+invisible(lapply(data.object, function(obj){
+  p <- SpatialFeaturePlot(object = obj, features = "nFeature_Spatial", crop = F, pt.size.factor = 1, stroke = 0, images = "slice1") + ggtitle(paste(unique(obj$sample_type)," ID: ", unique(obj$sample_id), sep = "" )) + theme(plot.title = element_text(size = 15, hjust = 0.5), title = element_text(size = 10), legend.key.size = unit(7, units = "mm"), legend.text = element_text(size = 8), legend.direction = "vertical", legend.position = "right")
+  
+  print(p)
+}))
+```
+
+There were some spots detected outside the tissue. Manually selected spots in the Loupe browser for these. It was challenging to remove them computationally without having to do strict filtering.
+
+### UMI per spot distribution
+```{r verbose = FALSE, message=FALSE, warning=FALSE, fig.show="hold", out.width="33%", fig.height=6, fig.width=6}
+invisible(lapply(data.object, function(obj){
+  p <- SpatialFeaturePlot(object = obj, features = "nCount_Spatial", crop = F, pt.size.factor = 1, stroke = 0, images = "slice1") + ggtitle(paste(unique(obj$sample_type)," ID: ", unique(obj$sample_id), sep = "" )) + theme(plot.title = element_text(size = 15, hjust = 0.5), title = element_text(size = 10), legend.key.size = unit(7, units = "mm"), legend.text = element_text(size = 8), legend.direction = "vertical", legend.position = "right")
+  
+  print(p)
+}))
+```
+
+## Violin Plots
+
+### UMI distribution for each sample
+```{r verbose = FALSE, message=FALSE, warning=FALSE, fig.show="hold", out.width="33%", fig.height=6, fig.width=6}
+invisible(lapply(data.object, function(obj){
+  p <- VlnPlot(object = obj, features = c("nCount_Spatial"),  pt.size = 0.1) + 
+    ggtitle(paste(unique(obj$sample_type)," ID: ", unique(obj$sample_id), sep = "" )) +
+    theme(plot.title = element_text(size = 15, hjust = 0.5), title = element_text(size = 10), legend.key.size = unit(7, units = "mm"), legend.text = element_text(size = 8), legend.direction = "vertical", legend.position = "right")
+  
+  print(p)
+}))
+```
+
+### Genes distribution for each sample
+```{r verbose = FALSE, message=FALSE, warning=FALSE, fig.show="hold", out.width="33%", fig.height=6, fig.width=6}
+invisible(lapply(data.object, function(obj){
+  p <- VlnPlot(object = obj, features = c("nFeature_Spatial"),  pt.size = 0.1) + 
+    ggtitle(paste(unique(obj$sample_type)," ID: ", unique(obj$sample_id), sep = "" )) +
+    theme(plot.title = element_text(size = 15, hjust = 0.5), title = element_text(size = 10), legend.key.size = unit(7, units = "mm"), legend.text = element_text(size = 8), legend.direction = "vertical", legend.position = "right")
+  
+  print(p)
+}))
+```
+
+
+```{r eval=FALSE}
+print("Minimum values")
+
+for(i in 1:length(data.object)){
+  print(min(data.object[[i]]$nCount_Spatial))
+}
+```
+
+```{r eval=FALSE}
+print("Mean values")
+
+mean_val <- c()
+for(i in 1:length(data.object)){
+  print(mean(data.object[[i]]$nCount_Spatial))
+  mean_val <- union(mean_val, mean(data.object[[i]]$nCount_Spatial))
+}
+```
+
+
+```{r eval=FALSE}
+#mean_val = c(10316, 10811, 13283, 9105, 12097, 13852)
+brain_metadata2$mean_umi = mean_val
+```
+
+
+```{r}
+p1 <- ggplot(data = brain_metadata2, aes(x=SampleID, y = mean_umi, fill = Type)) + 
+  geom_bar(stat = "identity") +
+  scale_x_discrete(limits = brain_metadata2$SampleID) +
+  theme_minimal() +
+  theme(axis.title.x = element_text(size = 20),
+        axis.title.y = element_text(size = 20),
+        axis.text.x = element_text(size = 15, angle = 90),
+        axis.text.y = element_text(size = 15),
+        legend.title = element_text(size = 20),
+        legend.text = element_text(size = 15),
+        title = element_text(size = 25, face = "bold")) +
+  ggtitle("Mean UMI per spot before filtering")
+
+p1
+```
+
+
+```{r eval=FALSE}
+print("Maximum values")
+for(i in 1:length(data.object)){
+  print(max(data.object[[i]]$nCount_Spatial))
+}
+```
+
+# After filtering
+
+```{r eval=FALSE}
+data.object.filter <- lapply(data.object, function(obj){
+  mt.genes <- grep(pattern = "^mt-", x = rownames(obj), value = T)
+  rb.genes <- grep(pattern = "^Rp[sl]", x = rownames(obj), value = T)
+  hb.genes <- grep(pattern = "^Hb", x = rownames(obj), value = T)
+  obj <- obj[!rownames(obj) %in% mt.genes, ]
+  obj <- obj[!rownames(obj) %in% rb.genes, ]
+  obj <- obj[!rownames(obj) %in% hb.genes, ]
+})
+```
+
+```{r eval=FALSE}
+# * Number of genes detected per UMI for each spot in the data
+for(index in 1:length(data.object.filter)){
+  
+  data.object.filter[[index]]$log10GenesPerUMI<-log10(data.object.filter[[index]]$nFeature_Spatial) / log10(data.object.filter[[index]]$nCount_Spatial) 
+}
+```
+
+```{r eval=FALSE}
+#* log10GenesPerUMI or genes/UMI ratio > 0.87 - Nope
+data.object.filter2 <- lapply(data.object.filter, function(obj){
+  obj = obj[rowSums(obj) > 0, 
+            (obj$nCount_Spatial > 100) & (obj$nFeature_Spatial > 200)]
+})
+
+rm(data.object.filter)
+```
+
+```{r eval=FALSE}
+print("Mean values")
+
+mean_val_filter <- c()
+for(i in 1:length(data.object.filter2)){
+  print(mean(data.object.filter2[[i]]$nCount_Spatial))
+  mean_val_filter <- union(mean_val_filter, mean(data.object.filter2[[i]]$nCount_Spatial))
+}
+```
+
+
+```{r eval=FALSE}
+#mean_val_filter = c(7112, 7243, 9658, 6002, 8338, 9838)
+brain_metadata2$mean_umi_filter = mean_val_filter
+```
+
+## Bar plots
+
+### Mean UMI per spot
+```{r}
+p1 <- ggplot(data = brain_metadata2, aes(x=SampleID, y = mean_umi_filter, fill = Type)) + 
+  geom_bar(stat = "identity") +
+  scale_x_discrete(limits = brain_metadata2$SampleID) +
+  theme_minimal() +
+  theme(axis.title.x = element_text(size = 20),
+        axis.title.y = element_text(size = 20),
+        axis.text.x = element_text(size = 15, angle = 90),
+        axis.text.y = element_text(size = 15),
+        legend.title = element_text(size = 20),
+        legend.text = element_text(size = 15),
+        title = element_text(size = 25, face = "bold")) +
+  ggtitle("Mean UMI per spot after filtering Mt, Rb and Hb genes")
+
+p1
+```
+
+## Spatial Plots
+
+### Genes per spot distribution
+```{r verbose = FALSE, message=FALSE, warning=FALSE, fig.show="hold", out.width="33%", fig.height=6, fig.width=6}
+invisible(lapply(data.object.filter2, function(obj){
+  p <- SpatialFeaturePlot(object = obj, features = "nFeature_Spatial", crop = F, pt.size.factor = 1, stroke = 0, images = "slice1") + 
+    ggtitle(paste(unique(obj$sample_type)," ID: ", unique(obj$sample_id), sep = "" )) + 
+    theme(plot.title = element_text(size = 15, hjust = 0.5), title = element_text(size = 10), legend.key.size = unit(7, units = "mm"), legend.text = element_text(size = 8), legend.direction = "vertical", legend.position = "right")
+  
+  print(p)
+}))
+```
+
+
+### UMI per spot distribution
+```{r verbose = FALSE, message=FALSE, warning=FALSE, fig.show="hold", out.width="33%", fig.height=6, fig.width=6}
+invisible(lapply(data.object.filter2, function(obj){
+  p <- SpatialFeaturePlot(object = obj, features = "nCount_Spatial", crop = F, pt.size.factor = 1, stroke = 0, images = "slice1") + ggtitle(paste(unique(obj$sample_type)," ID: ", unique(obj$sample_id), sep = "" )) + theme(plot.title = element_text(size = 15, hjust = 0.5), title = element_text(size = 10), legend.key.size = unit(7, units = "mm"), legend.text = element_text(size = 8), legend.direction = "vertical", legend.position = "right")
+  
+  print(p)
+}))
+```
+
+## Violin Plots
+
+### UMI distribution for each sample
+```{r verbose = FALSE, message=FALSE, warning=FALSE, fig.show="hold", out.width="33%", fig.height=6, fig.width=6}
+invisible(lapply(data.object.filter2, function(obj){
+  p <- VlnPlot(object = obj, features = c("nCount_Spatial"),  pt.size = 0.1) + 
+    ggtitle(paste(unique(obj$sample_type)," ID: ", unique(obj$sample_id), sep = "" )) +
+    theme(plot.title = element_text(size = 15, hjust = 0.5), title = element_text(size = 10), legend.key.size = unit(7, units = "mm"), legend.text = element_text(size = 8), legend.direction = "vertical", legend.position = "right")
+  
+  print(p)
+}))
+```
+
+### Genes distribution for each sample
+```{r verbose = FALSE, message=FALSE, warning=FALSE, fig.show="hold", out.width="33%", fig.height=6, fig.width=6}
+invisible(lapply(data.object.filter2, function(obj){
+  p <- VlnPlot(object = obj, features = c("nFeature_Spatial"),  pt.size = 0.1) + 
+    ggtitle(paste(unique(obj$sample_type)," ID: ", unique(obj$sample_id), sep = "" )) +
+    theme(plot.title = element_text(size = 15, hjust = 0.5), title = element_text(size = 10), legend.key.size = unit(7, units = "mm"), legend.text = element_text(size = 8), legend.direction = "vertical", legend.position = "right")
+  
+  print(p)
+}))
+```
+
+
+```{r eval=FALSE, echo=FALSE}
+saveRDS(data.object.filter2, file = "data.filt.nurr1.rds") #This object is after loading the manually aligned images for some samples
+```
+

@@ -1,0 +1,48 @@
+---
+title: "Normalisation of Nurr1 dataset"
+author: "Yuvarani Masarapu"
+date: '2022-11-30'
+output:   
+  html_document:
+    self_contained: true
+    number_sections: true
+    highlight: tango
+    df_print: paged
+    code_folding: hide
+    toc: yes
+    toc_depth: 3
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+---
+
+```{r}
+library(SeuratObject)
+library(Seurat)
+library(sctransform)
+library(Matrix)
+library(RColorBrewer)
+library(Rcpp)
+library(glmGamPoi)
+
+#if (!requireNamespace("BiocManager", quietly = TRUE))
+#    install.packages("BiocManager")
+
+#BiocManager::install("glmGamPoi")
+```
+
+### Load filtered seurat object
+```{r}
+data.object.filter2 <- readRDS(file = "data.filt.nurr1.rds")
+```
+
+
+### Normalisation and data integration
+```{r eval=FALSE}
+data.object.filter.norm <- lapply(data.object.filter2, function(obj.filt){
+  obj.filt <- SCTransform(object = obj.filt, assay = "Spatial", method = "glmGamPoi", verbose = FALSE, return.only.var.genes = F, vars.to.regress = c("nFeature_Spatial"), seed.use = 71)
+})
+
+saveRDS(data.object.filter.norm, file = "nurr1_normalised.rds")
+```
+

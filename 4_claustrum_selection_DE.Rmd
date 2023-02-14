@@ -1,0 +1,151 @@
+---
+title: "CLA spots selection and DE analysis"
+author: "Yuvarani Masarapu"
+date: "2023-02-01"
+output: html_document
+---
+
+```{r message=FALSE, verbose=FALSE, warning=FALSE, eval=FALSE}
+### Loading package libraries
+library(Seurat)
+library(SeuratObject)
+#hdfr to read 10x hdf5r files, won't work otherwise
+library(hdf5r)
+library(readr)
+library(readxl)
+library(ggplot2)
+```
+
+Read the selected json files from Loupe Browser
+
+```{r}
+indir <- getwd()
+indir <- paste(indir, "/json_files_original", sep = "")
+```
+
+```{r warning=FALSE, message=FALSE}
+library(readr)
+list_csv_files <- as.list(list.files(path = indir, full.names = TRUE))
+
+df_list <- lapply(list_csv_files, function(x)
+  {
+    df <- readr::read_csv(x, col_names = c("barcodes", "tissue_pos" ,"array_pos1", "array_pos2", "image_x", "image_y"))
+})
+
+names(df_list) <- c("s1", "s2", "s3", "s4", "s5", "s6")
+```
+
+
+```{r}
+indir <- getwd()
+### Add metadata
+brain_metadata <- read_excel(paste(indir, "/Nurr1_Project_LabInfo.xlsx", sep = ""), sheet = "Sheet1")
+brain_metadata$sno <- c(1:6)
+
+new_order <- c(brain_metadata$sno[brain_metadata$Type %in% "AAV-Nurr1cKO"], brain_metadata$sno[brain_metadata$Type %in% "AAV-Ctrl"])
+brain_metadata2 <- brain_metadata[new_order,]
+```
+
+Reorder the json dataframe files so the order matches with sample order in the analysis.
+
+```{r}
+df_list <- df_list[new_order]
+```
+
+Now let's append sample indexes so the barcodes match as in the final object. This is how the barcodes are in the object.
+
+```{r}
+ids <- c(1:6)
+
+for(i in 1:length(df_list)){
+  df_list[[i]]$barcodes <- paste(df_list[[i]]$barcodes, "_", ids[i], sep = "")
+}
+```
+
+Now let's keep only the barcodes that are present in the tissue (the ones we have selected in the Loupe browser).
+We will do check on these later after subsetting the final seurat object using these spots.
+
+```{r}
+for(i in 1:length(df_list)){
+  df_list[[i]] <- df_list[[i]][df_list[[i]]$tissue_pos == 1, ]
+}
+#Double checked by counting the spots filtered at this step with the manual annotated images from Loupe Browser.
+```
+
+
+```{r}
+final_spots <- union(df_list[[1]]$barcodes,
+                     union(df_list[[2]]$barcodes,
+                           union(df_list[[3]]$barcodes,
+                                 union(df_list[[4]]$barcodes,
+                                       union(df_list[[5]]$barcodes, df_list[[6]]$barcodes)))))
+```
+
+Now that we know which spots ids belong to the selected CLA region, we can subset the main dataset object for these and then run DE analysis between the two sample groups.
+
+```{r}
+data.final.clusters.nurr1 <- readRDS("~/Documents/Nurr1_project/data.final.clusters.nurr1_updated.rds")
+
+subset_DE <- subset(data.final.clusters.nurr1, cells = final_spots)
+
+#One last check to make sure the spots in subset dataset match with the spot ids that were selected in the CLA region.
+unique(colnames(subset_DE) == final_spots)
+```
+
+## Spatial Plots
+
+### order of images for samples
+### first treated, then controls
+```{r}
+images <- c("slice1", "slice1.1", "slice1.2", 
+            "slice1.3", "slice1.4", "slice1.5")
+sample_type <- c(rep("AAV-Nurr1cKO", 3), rep("AAV-Ctrl", 3))
+sample_name <- unique(subset_DE$sample_id)
+for(i in 1:length(images)){
+  p <- SpatialFeaturePlot(object = subset_DE, features = "nCount_SCT" ,crop = F, pt.size.factor = 1, stroke = 0, images = images[i]) +
+    ggtitle(paste(unique(sample_type[i])," ID: ", unique(sample_name[i]),sep = "" )) + 
+    theme(plot.title = element_text(size = 40, hjust = 0.5), 
+          title = element_text(size = 30), 
+          legend.key.size = unit(20, units = "mm"),
+          legend.text = element_text(size = 20), 
+          legend.direction = "vertical", 
+          legend.position = "right", 
+          legend.key = element_rect(size = 60), 
+          legend.key.height = unit(10, units = "mm"))
+  
+  print(p)
+}
+rm(p)
+```
+
+
+Let's run DE analysis now
+```{r}
+#BiocManager::install('limma')
+
+subset_DE <- PrepSCTFindMarkers(object = subset_DE, assay = "SCT", verbose = TRUE)
+
+de_genes <- FindMarkers(object = subset_DE, assay = "SCT", ident.1 = "AAV-Nurr1cKO", ident.2 = "AAV-Ctrl", group.by = "sample_type", min.pct = 0.1, min.cells.group = 3, random.seed = 83, recorrect_umi=FALSE)
+```
+
+```{r}
+de_genes$gene <- rownames(de_genes)
+de_genes <- de_genes[order(de_genes$avg_log2FC, decreasing = TRUE),]
+de_genes <- de_genes[de_genes$p_val_adj < 0.1, ]
+```
+
+Save the DE genes list.
+
+```{r}
+out.dir <- getwd()
+library(openxlsx)
+write.xlsx(de_genes, file = paste(out.dir, "/claustrum_DE.xlsx", sep = ""))
+```
+
+Save the spot ids for CLA region and also the subset CLA object.
+
+```{r}
+saveRDS(subset_DE, file = "subset_claustrum.rds")
+saveRDS(final_spots, file = "claustrum_spot_ids.rds")
+```
+

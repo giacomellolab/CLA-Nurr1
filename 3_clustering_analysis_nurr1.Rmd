@@ -1,0 +1,253 @@
+---
+title: "Nurr1 project clustering"
+author: "Yuvarani Masarapu"
+date: "11/18/2022"
+output: 
+  html_document:
+    code_folding: hide
+    toc: TRUE
+---
+
+```{r}
+library(SeuratObject)
+library(Seurat)
+library(harmony)
+library(sctransform)
+library(Matrix)
+library(RColorBrewer)
+library(ggplot2)
+```
+
+### Load filtered seurat object
+```{r}
+data.object.filter.norm <- readRDS(file = "nurr1_normalised.rds")
+```
+
+### Data integration
+```{r eval=FALSE}
+integration.features <- SelectIntegrationFeatures(object.list = data.object.filter.norm, nfeatures = 5000)
+
+#modifying the maximum size of global variables
+options(future.globals.maxSize = 8000 * 1024^8)
+
+data.object.filter.norm <- PrepSCTIntegration(object.list = data.object.filter.norm, anchor.features = integration.features, verbose = FALSE)
+
+set.seed(93)
+integration.anchors <- FindIntegrationAnchors(object.list = data.object.filter.norm, normalization.method = "SCT", anchor.features = integration.features, verbose = FALSE)
+
+saveRDS(integration.anchors, file = "integration.anchors.nurr1.rds")
+saveRDS(integration.features, file = "integration.features.nurr1.rds")
+#integration.achors <- readRDS("~/Documents/Nurr1_project/integration.achors.rds")
+
+data.object.filter.norm.integrated = IntegrateData(anchorset = integration.anchors, normalization.method = "SCT", verbose = FALSE)
+saveRDS(data.object.filter.norm.integrated, file = "integrated.data.nurr1.rds")
+```
+
+### Dimensionality reduction and Clustering
+
+ *40 dimensions chosen for further analysis
+ 
+```{r}
+indir <- getwd()
+
+integration.features <- readRDS("~/Documents/Nurr1_project/integration.features.nurr1.rds")
+data.object.filter.norm.integrated <- readRDS("~/Documents/Nurr1_project/integrated.data.nurr1.rds")
+
+VariableFeatures(data.object.filter.norm.integrated) <- integration.features
+
+data.object.filter.norm.integrated <- RunPCA(data.object.filter.norm.integrated, assay = "SCT", verbose = FALSE, features = integration.features, npcs = 50, reduction.name = "pca_before_harmony", seed.use = 82)
+
+ElbowPlot(object = data.object.filter.norm.integrated, ndims = 50, reduction = "pca_before_harmony") + ggtitle("Elbow plot to select significant PCs")
+
+col_vector <-  c("#F18F01", "#878787", "#FCCDE5", "#048BA8", "#2E4057", "#99C24D", "#B95F89", "#5F070C" ,  "#DFC27D", "#DB6C79", "#B191FF", "#157A6E", "#73683B", "#97C8EB","#C51B7D", "#BA9763", "#31081F", "#52D1DC", "#700353", "#F5D3C8", "#725752", "#D8315B", "#6B4E71", "#8CBFCF" , "#C2B2B4", "#EDE5A6")
+
+DefaultAssay(data.object.filter.norm.integrated) <- "SCT"
+
+#modifying the maximum size of global variables
+options(future.globals.maxSize = 8000 * 1024^2)
+
+data.object.filter.norm.integrated <- RunUMAP(object = data.object.filter.norm.integrated, dims = 1:40, assay = "SCT", seed.use = 67, reduction = "pca_before_harmony", reduction.name = "umap_before_harmony") #40 contributing PCs chosen for further analysis
+```
+
+Plots for results assessment
+
+```{r}
+DimPlot(object = data.object.filter.norm.integrated, group.by = "sample_id", reduction = "umap_before_harmony", cols = col_vector) + ggtitle("Before batch correction (spots grouped by sections)")
+#slides well blended
+DimPlot(object = data.object.filter.norm.integrated, group.by = "slide_id", reduction = "umap_before_harmony", cols = col_vector)  + ggtitle("slides")
+#sub arrays don't blend well
+DimPlot(object = data.object.filter.norm.integrated, group.by = "sample_type", reduction = "umap_before_harmony", cols = col_vector) + ggtitle("sample type")
+DimPlot(object = data.object.filter.norm.integrated, group.by = "sub_array", reduction = "umap_before_harmony", cols = col_vector) + ggtitle("sub array")
+FeaturePlot(object = data.object.filter.norm.integrated, features = "nCount_SCT", reduction = "umap_before_harmony")
+FeaturePlot(object = data.object.filter.norm.integrated, features = "nCount_Spatial", reduction = "umap_before_harmony")
+```
+
+### Batch effects removal
+
+```{r}
+library(harmony)
+set.seed(57)
+data.object.filter.norm.integrated <- RunHarmony(object = data.object.filter.norm.integrated, group.by.vars = c("sample_id"), theta = c(2), assay.use = "SCT", reduction = "pca_before_harmony", dims.use = 1:40, plot_convergence = T, verbose = F, reduction.save = "harmony_sid_1")
+
+data.object.filter.norm.integrated <- RunUMAP(object = data.object.filter.norm.integrated, assay.use = "SCT", reduction = "harmony_sid_1", dims = 1:40, seed.use = 21, reduction.name = "umap_after_harmony")
+```
+
+Plots for assessment after batch correction
+
+```{r}
+DimPlot(object = data.object.filter.norm.integrated, group.by = "sample_id", reduction = "umap_after_harmony", cols = col_vector) + ggtitle("Batch corrected data")
+DimPlot(object = data.object.filter.norm.integrated, group.by = "slide_id", reduction = "umap_after_harmony", cols = col_vector) + ggtitle("Batch corrected data")
+DimPlot(object = data.object.filter.norm.integrated, group.by = "sample_type", reduction = "umap_after_harmony", cols = col_vector) + ggtitle("Batch corrected data")
+DimPlot(object = data.object.filter.norm.integrated, group.by = "sub_array", reduction = "umap_after_harmony", cols = col_vector) + ggtitle("Batch corrected data")
+FeaturePlot(object = data.object.filter.norm.integrated, features = "nCount_SCT", reduction = "umap_after_harmony")
+FeaturePlot(object = data.object.filter.norm.integrated, features = "nCount_Spatial", reduction = "umap_after_harmony")
+```
+
+
+```{r}
+saveRDS(data.object.filter.norm.integrated, file = "data.integrated.harm.nurr1.rds")
+```
+
+# Clustering
+```{r}
+set.seed(79)
+data.object.filter.norm.integrated <- FindNeighbors(object = data.object.filter.norm.integrated, assay = "SCT", dims = 1:40, k.param = 23, graph.name = "graph_afterHarmony", reduction = "harmony_sid_1")
+
+data.object.filter.norm.integrated <- FindClusters(object = data.object.filter.norm.integrated, pc.use = 1:40, resolution = 2, save.SNN = T, do.sparse = T, graph.name = "graph_afterHarmony", random.seed = 17, group.singletons = TRUE, verbose = TRUE)
+
+cl.colors <-  c("#F18F01", "#878787", "#FCCDE5", "#048BA8", "#2E4057", "#99C24D", "#B95F89", "#5F070C" ,  "#DFC27D", "#DB6C79", "#B191FF", "#157A6E", "#EB4511", "#73683B", "#97C8EB","#C51B7D", "#BA9763", "#31081F", "#52D1DC", "#700353", "#F5D3C8", "#725752", "#D8315B", "#6B4E71", "#8CBFCF" , "#C2B2B4", "#690375" ,"#EDE5A6", "#52B788", "#EE1B26", "#F2F230", "#91F291", "#845A6D")
+pie(rep(1,length(cl.colors)), col = cl.colors)
+```
+
+Generate and save all plots from clustering
+
+```{r}
+out.dir <- file.path(indir,"updated_clusters")
+dir.create(out.dir)
+
+p <- DimPlot(object = data.object.filter.norm.integrated, group.by = "seurat_clusters", reduction = "umap_after_harmony", pt.size = 0.8, label = T, cols = cl.colors, label.size = 12) + ggtitle("Clusters in Nurr1 dataset")
+ggsave(p, filename = paste(out.dir, "/clusters_umap_nurr1.pdf", sep = ""), dpi = 300, width = 14, height = 14)
+
+p <- VlnPlot(object = data.object.filter.norm.integrated, features = "nFeature_Spatial", group.by = "seurat_clusters", assay = "SCT", pt.size = 0, cols = cl.colors) + ggtitle("Genes per spot for each cluster: Nurr1 dataset")
+ggsave(p, filename = paste(out.dir, "/nfeatures_per_cluster.pdf", sep = ""), dpi = 300, width = 14, height = 10)
+
+p <- VlnPlot(object = data.object.filter.norm.integrated, features = "nCount_Spatial", group.by = "seurat_clusters", assay = "SCT", pt.size = 0, cols = cl.colors) + ggtitle("UMIs per spot for each cluster: Nurr1 dataset")
+ggsave(p, filename = paste(out.dir, "/nCounts_per_cluster.pdf", sep = ""), dpi = 300, width = 14, height = 10)
+```
+
+Cluster stats
+
+```{r}
+#Total number of spots per cluster
+library(openxlsx)
+
+cluster_stats <- list()
+
+cluster_stats[[1]] <- table(data.object.filter.norm.integrated@active.ident, data.object.filter.norm.integrated@meta.data$orig.ident)
+
+cluster_stats[[2]] <- table(data.object.filter.norm.integrated@active.ident, data.object.filter.norm.integrated@meta.data$sample_id)
+
+cluster_stats[[3]] <- table(data.object.filter.norm.integrated@active.ident, data.object.filter.norm.integrated@meta.data$sample_type)
+
+names(cluster_stats) <- c("spots_per_cluster", "spots_across_sections", "spots_across_condition")
+write.xlsx(cluster_stats, file = paste(out.dir, "/cluster_stats.xlsx", sep = ""))
+```
+
+Spatial plots for clusters on tissue sections
+
+```{r}
+#order of images for samples
+#first treated, then controls
+images <- c("slice1", "slice1.1", "slice1.2", 
+            "slice1.3", "slice1.4", "slice1.5")
+sample_type <- c(rep("AAV-Nurr1cKO", 3), rep("AAV-Ctrl", 3))
+sample_name <- unique(data.object.filter.norm.integrated$sample_id)
+
+names(cl.colors) <- levels(data.object.filter.norm.integrated)
+path.plots <- file.path(out.dir, "clusters_on_tissue")
+dir.create(path = path.plots)
+for(i in 1:length(images)){
+  p <- SpatialDimPlot(object = data.object.filter.norm.integrated, crop = F, pt.size.factor = 1, stroke = 0, images = images[i], label = T, cols = cl.colors) +
+    ggtitle(paste(unique(sample_type[i])," ID: ", unique(sample_name[i]),sep = "" )) + 
+    theme(plot.title = element_text(size = 40, hjust = 0.5), 
+          title = element_text(size = 30), 
+          legend.key.size = unit(20, units = "mm"),
+          legend.text = element_text(size = 20), 
+          legend.direction = "vertical", 
+          legend.position = "right", 
+          legend.key = element_rect(size = 60), 
+          legend.key.height = unit(10, units = "mm"))
+  ggsave(p, filename = paste(path.plots, "/", sample_name[i], "_clusters_nurr1.pdf", sep = ""), dpi = 300, width = 14, height = 14)
+}
+
+#saveRDS(data.object.filter.norm.integrated, file = "data.final.clusters.nurr1.rds")
+saveRDS(data.object.filter.norm.integrated ,"~/Documents/Nurr1_project/data.final.clusters.nurr1_updated.rds")
+```
+
+
+```{r}
+data.object.filter.norm.integrated <- PrepSCTFindMarkers(object = data.object.filter.norm.integrated, assay = "SCT", verbose = TRUE)
+
+markers_res1.5 <- FindAllMarkers(object = data.object.filter.norm.integrated, assay = "SCT", min.pct = 0.1, only.pos = FALSE)
+write.csv(markers_res1.5, file = paste(out.dir,"/cluster_markers_nurr1.csv", sep = ""), row.names = TRUE, col.names = TRUE)
+#saveRDS(data.object.filter.norm.integrated, file = "data.final.clusters.nurr1_updated.rds")
+
+library(dplyr)
+temp_markers_res1.5 <- split(markers_res1.5, f = markers_res1.5$cluster)
+for(i in 1:length(unique(data.object.filter.norm.integrated$seurat_clusters))){
+  temp_markers_res1.5[[i]] <- temp_markers_res1.5[[i]][order(temp_markers_res1.5[[i]]$avg_log2FC, decreasing = TRUE),]
+}
+
+library(openxlsx)
+write.xlsx(temp_markers_res1.5, file = paste(out.dir,"/cluster_markers_nurr1.xlsx", sep = ""))
+```
+
+```{r}
+clusters.list <- SplitObject(object = data.object.filter.norm.integrated, split.by = "ident")
+#saveRDS(clusters.list, file = paste(out.dir,"/object_split_by_cluster.rds", sep = ""))
+```
+
+
+```{r eval=FALSE}
+#Tried reinstalling sctransform develop to address prepsctfindmarkers() issue
+#remotes::install_github("ChristophH/sctransform@develop")
+
+#Ran PrepSCTFindMarkers() already to recorrect UMIs in the main dataset and SCT assay already replaced by recorrect counts, data slor replaced by log1p of recorrected counts. Hence not doing running that again here.
+#Also writing recorrect_umi=FALSE when invoke FindMarkers() and avoid throwing errors.
+de.genes.treated <- lapply(clusters.list, function(cl_obj){
+  #cl_obj <- PrepSCTFindMarkers(object = cl_obj, assay = "SCT", verbose = TRUE)
+  temp <- FindMarkers(object = cl_obj, assay = "SCT", ident.1 = "AAV-Nurr1cKO", ident.2 = "AAV-Ctrl", group.by = "sample_type", min.pct = 0.1, min.cells.group = 3, random.seed = 71, recorrect_umi=FALSE)
+})
+
+for(i in 1:length(de.genes.treated)){
+  de.genes.treated[[i]]$gene <- rownames(de.genes.treated[[i]])
+  de.genes.treated[[i]] <- de.genes.treated[[i]][order(de.genes.treated[[i]]$avg_log2FC, decreasing = TRUE),]
+  de.genes.treated[[i]] <- de.genes.treated[[i]][de.genes.treated[[i]]$p_val_adj < 0.1, ]
+}
+#names(de.genes.treated) to get the new order starting clusters 0 to 31
+#new_order_de <- c(21,1,8,15,14,29,27,20,12,17,9,25,5,10,2,31,4,19,6,13,22,23,18,30,3,16,28,24,32,11,26,7)
+#de.genes.treated1 <- de.genes.treated[new_order_de]
+
+out.dir <- getwd()
+library(openxlsx)
+write.xlsx(de.genes.treated, file = paste(out.dir, "/clusters/DE_genes-per_cluster.xlsx", sep = ""))
+```
+
+```{r}
+de.nurr1.genes <- FindMarkers(object = data.object.filter.norm.integrated, assay = "SCT", ident.1 = "AAV-Nurr1cKO", ident.2 = "AAV-Ctrl", group.by = "sample_type", min.pct = 0.1, min.cells.group = 3, random.seed = 71, recorrect_umi=FALSE)
+
+```
+
+```{r}
+de.nurr1.genes$gene <- rownames(de.nurr1.genes)
+de.nurr1.genes <- de.nurr1.genes[order(de.nurr1.genes$avg_log2FC, decreasing = TRUE),]
+de.nurr1.genes <- de.nurr1.genes[de.nurr1.genes$p_val_adj < 0.1, ]
+```
+
+```{r}
+out.dir <- getwd()
+library(openxlsx)
+write.xlsx(de.nurr1.genes, file = paste(out.dir, "/Nurr1_DE-KO_Control.xlsx", sep = ""))
+```
+
+

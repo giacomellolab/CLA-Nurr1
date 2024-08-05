@@ -1,0 +1,552 @@
+---
+title: "code_for_figures"
+author: "Yuvarani Masarapu"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r}
+library(SeuratObject)
+library(Seurat)
+library(harmony)
+library(sctransform)
+library(Matrix)
+library(RColorBrewer)
+library(ggplot2)
+```
+
+# Load the seurat object containing the analysed spatial barcodes and clusters information.
+
+```{r}
+data.object.filter.norm.integrated <- readRDS("~/Documents/nurr1_project/data.final.clusters.nurr1_updated.rds")
+```
+
+```{r}
+colors_new <- c("#F18F01", "#878787", "#FCCDE5", "#048BA8", "#2E4057", "#99C24D", "#B95F89", "#5F070C", "#157A6E", "#DB6C79", "#B191FF", "#F2F230", "#EB4511", "#73683B", "#97C8EB", "#C51B7D", "#BA9763", "#31081F", "#52D1DC", "#700353", "#F5D3C8", "#725752", "#D8315B", "#6B4E71", "#8CBFCF")
+```
+
+```{r}
+indir <- getwd()
+```
+
+# Heatmap colors
+
+```{r}
+new.colors <- c("#BEBEBE", "#DCA88E", "#963634", "#381514")
+```
+
+
+# Plots
+
+## Panel 2e (spatial plots for all clusters between treated vs control)
+
+```{r}
+#order of images for samples
+#first treated, then controls
+images <- c("slice1", "slice1.1", "slice1.2", 
+            "slice1.3", "slice1.4", "slice1.5")
+sample_type <- c(rep("KO", 3), rep("Control", 3))
+sample_name <- unique(data.object.filter.norm.integrated$sample_id)
+
+names(colors_new) <- levels(data.object.filter.norm.integrated)
+path.plots <- file.path(indir, "clusters_on_tissue")
+dir.create(path = path.plots)
+for(i in 1:length(images)){
+  p <- SpatialDimPlot(object = data.object.filter.norm.integrated, crop = F, pt.size.factor = 1, stroke = 0, images = images[i], label = T, cols = colors_new) +
+    ggtitle(paste(unique(sample_type[i])," ID: ", unique(sample_name[i]),sep = "" )) + 
+    theme(plot.title = element_text(size = 40, hjust = 0.5), 
+          title = element_text(size = 30), 
+          legend.key.size = unit(20, units = "mm"),
+          legend.text = element_text(size = 20), 
+          legend.direction = "vertical", 
+          legend.position = "right", 
+          legend.key = element_rect(size = 60), 
+          legend.key.height = unit(10, units = "mm"))
+  ggsave(p, filename = paste(path.plots, "/", sample_name[i], "_clusters_nurr1.pdf", sep = ""), dpi = 300, width = 14, height = 14)
+}
+```
+
+
+## Panel 2f (UMAP for all clusters)
+
+```{r}
+p <- DimPlot(object = data.object.filter.norm.integrated, group.by = "seurat_clusters", reduction = "umap_after_harmony", pt.size = 0.8, label = T, cols = colors_new, label.size = 12) + ggtitle("Clusters in Nurr1 dataset")
+ggsave(p, filename = paste(indir, "/clusters_umap_nurr1.pdf", sep = ""), dpi = 300, width = 14, height = 14)
+```
+
+
+## Panel 2g (spatial plots and UMAP for gene expression in treated vs control for Nr4a2 gene)
+
+### UMAP (KO vs WT)
+
+```{r}
+out.dir <- paste(indir, "/UMAP_claustrum-region_KO-WT", sep = "")
+dir.create(out.dir)
+all.genes <- c("Nr4a2")
+
+lapply(all.genes, function(gene){
+  #p <- FeaturePlot(subset.claustrum, features = gene, slot = "data", split.by = "sample_type", reduction = #"umap_after_harmony", cols = colors_heatmap) & theme(legend.position = c(0.9,0.9))
+  p <- FeaturePlot(subset.claustrum, features = gene, slot = "data", split.by = "sample_type", reduction = "umap_after_harmony", cols = new.colors) & theme(legend.position = c(0.9,0.9))
+  ggsave(p, filename = paste(out.dir, "/", gene, ".pdf", sep = ""), dpi = 300, width = 16, height = 8)
+})
+```
+
+```{r}
+out.dir <- paste(indir, "/tissue_heatmaps_only_expression-spots", sep = "")
+dir.create(out.dir)
+genes <- c("Nr4a2")
+
+
+for(j in 1:length(genes)){
+  
+  temp = data.object.filter.norm.integrated[rownames(data.object.filter.norm.integrated) %in% genes[j], ]
+  print(length(colnames(temp))) #check how many spots are selected which would be the total spots
+  temp = temp[,colnames(temp)[colSums(temp@assays$SCT) > 0]] #changed code after seurat update to v5
+  print(length(colnames(temp))) #check how many spots are filtered which would all with no umis for genes[j]
+  min <- floor(min(temp@assays$SCT@data))
+  max <- ceiling(max(temp@assays$SCT@data))
+  
+  if(rownames(temp) %in% genes[j]){
+    
+    dir.create(paste(out.dir, "/", genes[j], sep = ""))
+    for(i in 1:length(sample_name)){
+      p = SpatialFeaturePlot(object = temp, features = genes[j], images = images[i], pt.size.factor = 0.9, stroke = 0, crop = F, alpha = c(1,1)) + 
+        scale_fill_gradientn(colors = new.colors, limits = c(min,max)) +
+        theme(legend.position = "right",
+              plot.title = element_text(hjust = 0.5, face = "bold")) +
+        ggtitle(paste(genes[j], " expression: Sample " ,sample_name[i], "_", sample_type[i], sep = ""))
+    ggsave(p, filename = paste(out.dir, "/", genes[j], "/", genes[j] ,"_on_", sample_name[i], "_", sample_type[i],".pdf", sep = ""), dpi = 300)
+  }
+    
+}
+
+}
+
+rm(p,i,j,temp,out.dir,reds,blues,min,max)
+rm(genes)
+rm(markers, new_genes)
+```
+
+
+## Panel 2h (spatial plots and UMAP for gene expression in treated vs control for CLA spots)
+
+```{r}
+#Load the spot ids first
+claustrum.spots <- readRDS("claustrum_spot_ids.rds")
+
+#Also load the subset seurat object containing the CLA clusters
+subset.claustrum <- readRDS("subset_claustrum.rds")
+
+#KO spots
+ko.claustrum <- colnames(subset.claustrum)[subset.claustrum$sample_type %in% "KO"]
+
+#Control spots
+control.claustrum <- colnames(subset.claustrum)[subset.claustrum$sample_type %in% "Control"]
+```
+
+```{r}
+#Add metadata column to identify KO and Control spots from the claustrum region
+data.object.filter.norm.integrated$claustrum_id <- colnames(data.object.filter.norm.integrated)
+data.object.filter.norm.integrated$claustrum_id <- "Non-claustrum"
+data.object.filter.norm.integrated$claustrum_id[colnames(data.object.filter.norm.integrated) %in% ko.claustrum] <- "KO_claustrum"
+data.object.filter.norm.integrated$claustrum_id[colnames(data.object.filter.norm.integrated) %in% control.claustrum] <- "Control_claustrum"
+```
+
+```{r}
+umap.colors <- c("#30C0C4", "#FFB434", "grey")
+```
+
+### UMAPs
+```{r}
+p <- DimPlot(object = data.object.filter.norm.integrated, group.by = "claustrum_id", reduction = "umap_after_harmony", pt.size = 0.8, label = F, cols = umap.colors) + ggtitle("Claustrum spots separated by sample type")
+ggsave(p, filename = paste(indir, "/claustrum_UMAPs/claustrum_ko_vs_wt_UMAP.pdf", sep = ""), dpi = 300, width = 14, height = 14)
+```
+
+### Corresponding on tissue sections
+```{r}
+claustrum.cl.colors <- c("grey", "grey", "grey", "grey", "grey", "#048BA8", "#F18F01", "grey", "grey", "grey", "grey")
+#order of images for samples
+#first treated, then controls
+images <- c("slice1", "slice1.1", "slice1.2", 
+            "slice1.3", "slice1.4", "slice1.5")
+sample_type <- c(rep("KO", 3), rep("Control", 3))
+sample_name <- unique(data.object.filter.norm.integrated$sample_id)
+names(claustrum.cl.colors) <- levels(subset.claustrum)
+
+path.plots <- file.path(indir, "claustrum_region_on_tissue")
+dir.create(path = path.plots)
+for(i in 1:length(images)){
+  p <- SpatialDimPlot(object = subset.claustrum, crop = F, pt.size.factor = 1, stroke = 0, images = images[i], label = T, cols = claustrum.cl.colors) +
+    ggtitle(paste(unique(sample_type[i])," ID: ", unique(sample_name[i]),sep = "" )) + 
+    theme(plot.title = element_text(size = 40, hjust = 0.5), 
+          title = element_text(size = 30), 
+          legend.key.size = unit(20, units = "mm"),
+          legend.text = element_text(size = 20), 
+          legend.direction = "vertical", 
+          legend.position = "right", 
+          legend.key = element_rect(size = 60), 
+          legend.key.height = unit(10, units = "mm"))
+  ggsave(p, filename = paste(path.plots, "/", sample_name[i], "_claustrum_heatmap_by_cluster.pdf", sep = ""), dpi = 300, width = 14, height = 14)
+}
+```
+
+
+## Panel 2i (spatial plots and UMAP for gene expression in treated vs control for CLA spots within clusters 8 and 11)
+
+### UMAP
+```{r}
+p <- DimPlot(object = data.object.filter.norm.integrated, group.by = "claustrum_cluster", reduction = "umap_after_harmony", pt.size = 0.7, label = F, cols = c("#F18F01", "#048BA8", "grey"), split.by = "sample_type") + ggtitle("Claustrum spots split by sample, colored by cluster")
+ggsave(p, filename = paste(indir, "/claustrum_UMAPs/claustrum_UMAP_split_color_cl.pdf", sep = ""), dpi = 300, width = 20, height = 10)
+```
+
+### Spatial plots
+```{r}
+out.dir <- paste(indir, "/UMAP_claustrum-region_KO-WT", sep = "")
+dir.create(out.dir)
+
+lapply(all.genes, function(gene){
+  p <- FeaturePlot(subset.claustrum, features = gene, slot = "data", split.by = "sample_type", reduction = "umap_after_harmony", cols = new.colors) & theme(legend.position = c(0.9,0.9))
+  ggsave(p, filename = paste(out.dir, "/", gene, ".pdf", sep = ""), dpi = 300, width = 16, height = 8)
+})
+```
+
+
+## Panel 2k (spatial plots and UMAP for gene expression in treated vs control for Teglu12 gene)
+
+### UMAP (KO vs WT)
+
+```{r}
+out.dir <- paste(indir, "/UMAP_claustrum-region_KO-WT", sep = "")
+dir.create(out.dir)
+all.genes <- c("Teglu12")
+
+lapply(all.genes, function(gene){
+  #p <- FeaturePlot(subset.claustrum, features = gene, slot = "data", split.by = "sample_type", reduction = #"umap_after_harmony", cols = colors_heatmap) & theme(legend.position = c(0.9,0.9))
+  p <- FeaturePlot(subset.claustrum, features = gene, slot = "data", split.by = "sample_type", reduction = "umap_after_harmony", cols = new.colors) & theme(legend.position = c(0.9,0.9))
+  ggsave(p, filename = paste(out.dir, "/", gene, ".pdf", sep = ""), dpi = 300, width = 16, height = 8)
+})
+```
+
+```{r}
+out.dir <- paste(indir, "/tissue_heatmaps_only_expression-spots", sep = "")
+dir.create(out.dir)
+genes <- c("Teglu12")
+
+
+for(j in 1:length(genes)){
+  
+  temp = data.object.filter.norm.integrated[rownames(data.object.filter.norm.integrated) %in% genes[j], ]
+  print(length(colnames(temp))) #check how many spots are selected which would be the total spots
+  temp = temp[,colnames(temp)[colSums(temp@assays$SCT) > 0]] #changed code after seurat update to v5
+  print(length(colnames(temp))) #check how many spots are filtered which would all with no umis for genes[j]
+  min <- floor(min(temp@assays$SCT@data))
+  max <- ceiling(max(temp@assays$SCT@data))
+  
+  if(rownames(temp) %in% genes[j]){
+    
+    dir.create(paste(out.dir, "/", genes[j], sep = ""))
+    for(i in 1:length(sample_name)){
+      p = SpatialFeaturePlot(object = temp, features = genes[j], images = images[i], pt.size.factor = 0.9, stroke = 0, crop = F, alpha = c(1,1)) + 
+        scale_fill_gradientn(colors = new.colors, limits = c(min,max)) +
+        theme(legend.position = "right",
+              plot.title = element_text(hjust = 0.5, face = "bold")) +
+        ggtitle(paste(genes[j], " expression: Sample " ,sample_name[i], "_", sample_type[i], sep = ""))
+    ggsave(p, filename = paste(out.dir, "/", genes[j], "/", genes[j] ,"_on_", sample_name[i], "_", sample_type[i],".pdf", sep = ""), dpi = 300)
+  }
+    
+}
+
+}
+
+rm(p,i,j,temp,out.dir,reds,blues,min,max)
+rm(genes)
+rm(markers, new_genes)
+```
+
+
+## Panel 2i (spatial plots and UMAP for gene expression in treated vs control for Teglu20 gene)
+
+### UMAP (KO vs WT)
+
+```{r}
+out.dir <- paste(indir, "/UMAP_claustrum-region_KO-WT", sep = "")
+dir.create(out.dir)
+all.genes <- c("Teglu20")
+
+lapply(all.genes, function(gene){
+  #p <- FeaturePlot(subset.claustrum, features = gene, slot = "data", split.by = "sample_type", reduction = #"umap_after_harmony", cols = colors_heatmap) & theme(legend.position = c(0.9,0.9))
+  p <- FeaturePlot(subset.claustrum, features = gene, slot = "data", split.by = "sample_type", reduction = "umap_after_harmony", cols = new.colors) & theme(legend.position = c(0.9,0.9))
+  ggsave(p, filename = paste(out.dir, "/", gene, ".pdf", sep = ""), dpi = 300, width = 16, height = 8)
+})
+```
+
+```{r}
+out.dir <- paste(indir, "/tissue_heatmaps_only_expression-spots", sep = "")
+dir.create(out.dir)
+genes <- c("Teglu20")
+
+
+for(j in 1:length(genes)){
+  
+  temp = data.object.filter.norm.integrated[rownames(data.object.filter.norm.integrated) %in% genes[j], ]
+  print(length(colnames(temp))) #check how many spots are selected which would be the total spots
+  temp = temp[,colnames(temp)[colSums(temp@assays$SCT) > 0]] #changed code after seurat update to v5
+  print(length(colnames(temp))) #check how many spots are filtered which would all with no umis for genes[j]
+  min <- floor(min(temp@assays$SCT@data))
+  max <- ceiling(max(temp@assays$SCT@data))
+  
+  if(rownames(temp) %in% genes[j]){
+    
+    dir.create(paste(out.dir, "/", genes[j], sep = ""))
+    for(i in 1:length(sample_name)){
+      p = SpatialFeaturePlot(object = temp, features = genes[j], images = images[i], pt.size.factor = 0.9, stroke = 0, crop = F, alpha = c(1,1)) + 
+        scale_fill_gradientn(colors = new.colors, limits = c(min,max)) +
+        theme(legend.position = "right",
+              plot.title = element_text(hjust = 0.5, face = "bold")) +
+        ggtitle(paste(genes[j], " expression: Sample " ,sample_name[i], "_", sample_type[i], sep = ""))
+    ggsave(p, filename = paste(out.dir, "/", genes[j], "/", genes[j] ,"_on_", sample_name[i], "_", sample_type[i],".pdf", sep = ""), dpi = 300)
+  }
+    
+}
+
+}
+
+rm(p,i,j,temp,out.dir,reds,blues,min,max)
+rm(genes)
+rm(markers, new_genes)
+```
+
+
+## Panel 3a (CLA enrichment dotplots for treated vs control for some genes)
+```{r}
+library(ggplot2)
+
+library(readxl)
+cl.genes <- read_excel("claustrum_genes.xlsx", sheet = "for_DE_gene_expression") #this document contains the genes listed in panel 3a
+cl.genes <- unique(cl.genes$gene_name)
+```
+
+```{r}
+p <- DotPlot(object = subset.claustrum, features = cl.genes, group.by = "sample_type", cols = new.colors[1:3]) + coord_flip() + ggtitle("Claustrum DE genes- KO vs WT")
+ggsave(p, filename = paste(indir, "/dotplot_DEgenes_KO_vs_Control_claustrumOnly.pdf", sep = ""), dpi = 300, width = 6, height = 8)
+```
+
+
+## Panel 3b (CLA enrichment heatmap for clusters with some genelist)
+```{r}
+p <- DotPlot(object = data.object.filter.norm.integrated, features = cl.genes, group.by = "seurat_clusters", cols = new.colors[1:3]) + coord_flip() + ggtitle("Claustrum DE genes (exp. in clusters)")
+ggsave(p, filename = paste(indir, "/dotplot_claustrum_de_exp-clusters.pdf", sep = ""), dpi = 300, width = 10, height = 8)
+```
+
+
+## Panel 3c (spatial plots and UMAP for gene expression in treated vs control for Gnb4 gene)
+
+### UMAP (KO vs WT)
+
+```{r}
+out.dir <- paste(indir, "/UMAP_claustrum-region_KO-WT", sep = "")
+dir.create(out.dir)
+all.genes <- c("Gnb4")
+
+lapply(all.genes, function(gene){
+  #p <- FeaturePlot(subset.claustrum, features = gene, slot = "data", split.by = "sample_type", reduction = #"umap_after_harmony", cols = colors_heatmap) & theme(legend.position = c(0.9,0.9))
+  p <- FeaturePlot(subset.claustrum, features = gene, slot = "data", split.by = "sample_type", reduction = "umap_after_harmony", cols = new.colors) & theme(legend.position = c(0.9,0.9))
+  ggsave(p, filename = paste(out.dir, "/", gene, ".pdf", sep = ""), dpi = 300, width = 16, height = 8)
+})
+```
+
+```{r}
+out.dir <- paste(indir, "/tissue_heatmaps_only_expression-spots", sep = "")
+dir.create(out.dir)
+genes <- c("Gnb4")
+
+
+for(j in 1:length(genes)){
+  
+  temp = data.object.filter.norm.integrated[rownames(data.object.filter.norm.integrated) %in% genes[j], ]
+  print(length(colnames(temp))) #check how many spots are selected which would be the total spots
+  temp = temp[,colnames(temp)[colSums(temp@assays$SCT) > 0]] #changed code after seurat update to v5
+  print(length(colnames(temp))) #check how many spots are filtered which would all with no umis for genes[j]
+  min <- floor(min(temp@assays$SCT@data))
+  max <- ceiling(max(temp@assays$SCT@data))
+  
+  if(rownames(temp) %in% genes[j]){
+    
+    dir.create(paste(out.dir, "/", genes[j], sep = ""))
+    for(i in 1:length(sample_name)){
+      p = SpatialFeaturePlot(object = temp, features = genes[j], images = images[i], pt.size.factor = 0.9, stroke = 0, crop = F, alpha = c(1,1)) + 
+        scale_fill_gradientn(colors = new.colors, limits = c(min,max)) +
+        theme(legend.position = "right",
+              plot.title = element_text(hjust = 0.5, face = "bold")) +
+        ggtitle(paste(genes[j], " expression: Sample " ,sample_name[i], "_", sample_type[i], sep = ""))
+    ggsave(p, filename = paste(out.dir, "/", genes[j], "/", genes[j] ,"_on_", sample_name[i], "_", sample_type[i],".pdf", sep = ""), dpi = 300)
+  }
+    
+}
+
+}
+
+rm(p,i,j,temp,out.dir,reds,blues,min,max)
+rm(genes)
+rm(markers, new_genes)
+```
+
+## Panel 3d (spatial plots and UMAP for gene expression in treated vs control for Gng2 gene)
+
+### UMAP (KO vs WT)
+
+```{r}
+out.dir <- paste(indir, "/UMAP_claustrum-region_KO-WT", sep = "")
+dir.create(out.dir)
+all.genes <- c("Gng2")
+
+lapply(all.genes, function(gene){
+  #p <- FeaturePlot(subset.claustrum, features = gene, slot = "data", split.by = "sample_type", reduction = #"umap_after_harmony", cols = colors_heatmap) & theme(legend.position = c(0.9,0.9))
+  p <- FeaturePlot(subset.claustrum, features = gene, slot = "data", split.by = "sample_type", reduction = "umap_after_harmony", cols = new.colors) & theme(legend.position = c(0.9,0.9))
+  ggsave(p, filename = paste(out.dir, "/", gene, ".pdf", sep = ""), dpi = 300, width = 16, height = 8)
+})
+```
+
+```{r}
+out.dir <- paste(indir, "/tissue_heatmaps_only_expression-spots", sep = "")
+dir.create(out.dir)
+genes <- c("Gng2")
+
+
+for(j in 1:length(genes)){
+  
+  temp = data.object.filter.norm.integrated[rownames(data.object.filter.norm.integrated) %in% genes[j], ]
+  print(length(colnames(temp))) #check how many spots are selected which would be the total spots
+  temp = temp[,colnames(temp)[colSums(temp@assays$SCT) > 0]] #changed code after seurat update to v5
+  print(length(colnames(temp))) #check how many spots are filtered which would all with no umis for genes[j]
+  min <- floor(min(temp@assays$SCT@data))
+  max <- ceiling(max(temp@assays$SCT@data))
+  
+  if(rownames(temp) %in% genes[j]){
+    
+    dir.create(paste(out.dir, "/", genes[j], sep = ""))
+    for(i in 1:length(sample_name)){
+      p = SpatialFeaturePlot(object = temp, features = genes[j], images = images[i], pt.size.factor = 0.9, stroke = 0, crop = F, alpha = c(1,1)) + 
+        scale_fill_gradientn(colors = new.colors, limits = c(min,max)) +
+        theme(legend.position = "right",
+              plot.title = element_text(hjust = 0.5, face = "bold")) +
+        ggtitle(paste(genes[j], " expression: Sample " ,sample_name[i], "_", sample_type[i], sep = ""))
+    ggsave(p, filename = paste(out.dir, "/", genes[j], "/", genes[j] ,"_on_", sample_name[i], "_", sample_type[i],".pdf", sep = ""), dpi = 300)
+  }
+    
+}
+
+}
+
+rm(p,i,j,temp,out.dir,reds,blues,min,max)
+rm(genes)
+rm(markers, new_genes)
+```
+
+
+## Panel 3e (spatial plots and UMAP for gene expression in treated vs control for Rgs12 gene)
+
+### UMAP (KO vs WT)
+
+```{r}
+out.dir <- paste(indir, "/UMAP_claustrum-region_KO-WT", sep = "")
+dir.create(out.dir)
+all.genes <- c("Rgs12")
+
+lapply(all.genes, function(gene){
+  #p <- FeaturePlot(subset.claustrum, features = gene, slot = "data", split.by = "sample_type", reduction = #"umap_after_harmony", cols = colors_heatmap) & theme(legend.position = c(0.9,0.9))
+  p <- FeaturePlot(subset.claustrum, features = gene, slot = "data", split.by = "sample_type", reduction = "umap_after_harmony", cols = new.colors) & theme(legend.position = c(0.9,0.9))
+  ggsave(p, filename = paste(out.dir, "/", gene, ".pdf", sep = ""), dpi = 300, width = 16, height = 8)
+})
+```
+
+```{r}
+out.dir <- paste(indir, "/tissue_heatmaps_only_expression-spots", sep = "")
+dir.create(out.dir)
+genes <- c("Gng2")
+
+
+for(j in 1:length(genes)){
+  
+  temp = data.object.filter.norm.integrated[rownames(data.object.filter.norm.integrated) %in% genes[j], ]
+  print(length(colnames(temp))) #check how many spots are selected which would be the total spots
+  temp = temp[,colnames(temp)[colSums(temp@assays$SCT) > 0]] #changed code after seurat update to v5
+  print(length(colnames(temp))) #check how many spots are filtered which would all with no umis for genes[j]
+  min <- floor(min(temp@assays$SCT@data))
+  max <- ceiling(max(temp@assays$SCT@data))
+  
+  if(rownames(temp) %in% genes[j]){
+    
+    dir.create(paste(out.dir, "/", genes[j], sep = ""))
+    for(i in 1:length(sample_name)){
+      p = SpatialFeaturePlot(object = temp, features = genes[j], images = images[i], pt.size.factor = 0.9, stroke = 0, crop = F, alpha = c(1,1)) + 
+        scale_fill_gradientn(colors = new.colors, limits = c(min,max)) +
+        theme(legend.position = "right",
+              plot.title = element_text(hjust = 0.5, face = "bold")) +
+        ggtitle(paste(genes[j], " expression: Sample " ,sample_name[i], "_", sample_type[i], sep = ""))
+    ggsave(p, filename = paste(out.dir, "/", genes[j], "/", genes[j] ,"_on_", sample_name[i], "_", sample_type[i],".pdf", sep = ""), dpi = 300)
+  }
+    
+}
+
+}
+
+rm(p,i,j,temp,out.dir,reds,blues,min,max)
+rm(genes)
+rm(markers, new_genes)
+```
+
+
+## Panel 3f (spatial plots and UMAP for gene expression in treated vs control for Oprk1 gene)
+
+### UMAP (KO vs WT)
+
+```{r}
+out.dir <- paste(indir, "/UMAP_claustrum-region_KO-WT", sep = "")
+dir.create(out.dir)
+all.genes <- c("Oprk1")
+
+lapply(all.genes, function(gene){
+  #p <- FeaturePlot(subset.claustrum, features = gene, slot = "data", split.by = "sample_type", reduction = #"umap_after_harmony", cols = colors_heatmap) & theme(legend.position = c(0.9,0.9))
+  p <- FeaturePlot(subset.claustrum, features = gene, slot = "data", split.by = "sample_type", reduction = "umap_after_harmony", cols = new.colors) & theme(legend.position = c(0.9,0.9))
+  ggsave(p, filename = paste(out.dir, "/", gene, ".pdf", sep = ""), dpi = 300, width = 16, height = 8)
+})
+```
+
+```{r}
+out.dir <- paste(indir, "/tissue_heatmaps_only_expression-spots", sep = "")
+dir.create(out.dir)
+genes <- c("Oprk1")
+
+
+for(j in 1:length(genes)){
+  
+  temp = data.object.filter.norm.integrated[rownames(data.object.filter.norm.integrated) %in% genes[j], ]
+  print(length(colnames(temp))) #check how many spots are selected which would be the total spots
+  temp = temp[,colnames(temp)[colSums(temp@assays$SCT) > 0]] #changed code after seurat update to v5
+  print(length(colnames(temp))) #check how many spots are filtered which would all with no umis for genes[j]
+  min <- floor(min(temp@assays$SCT@data))
+  max <- ceiling(max(temp@assays$SCT@data))
+  
+  if(rownames(temp) %in% genes[j]){
+    
+    dir.create(paste(out.dir, "/", genes[j], sep = ""))
+    for(i in 1:length(sample_name)){
+      p = SpatialFeaturePlot(object = temp, features = genes[j], images = images[i], pt.size.factor = 0.9, stroke = 0, crop = F, alpha = c(1,1)) + 
+        scale_fill_gradientn(colors = new.colors, limits = c(min,max)) +
+        theme(legend.position = "right",
+              plot.title = element_text(hjust = 0.5, face = "bold")) +
+        ggtitle(paste(genes[j], " expression: Sample " ,sample_name[i], "_", sample_type[i], sep = ""))
+    ggsave(p, filename = paste(out.dir, "/", genes[j], "/", genes[j] ,"_on_", sample_name[i], "_", sample_type[i],".pdf", sep = ""), dpi = 300)
+  }
+    
+}
+
+}
+
+rm(p,i,j,temp,out.dir,reds,blues,min,max)
+rm(genes)
+rm(markers, new_genes)
+```
+
+
